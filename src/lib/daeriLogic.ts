@@ -858,3 +858,50 @@ export function saveMindDiaryEntries(
     // Ignore storage quota or private browsing errors gracefully
   }
 }
+
+export interface DrivingBackdropConfig {
+  laneDurationSec: number;
+  lampsDurationSec: number;
+  horizonDurationSec: number;
+  lightDurationSec: number;
+  skyTop: string;
+  skyBottom: string;
+  horizonFill: string;
+  hillFill: string;
+  roadSurface: string;
+  laneDashColor: string;
+  lampGlowColor: string;
+  ambientRibbonA: string;
+  ambientRibbonB: string;
+}
+
+const MODE_PACE_MULTIPLIER: Record<DrivingMode, number> = {
+  listen: 1.25, // slowest, most unhurried empathetic pace
+  organize: 1.0, // steady structured cruise
+  perspective: 0.85, // slightly brisker wide-vista pace
+};
+
+export function getDrivingBackdropConfig(
+  emotion: EmotionKey,
+  mode: DrivingMode,
+): DrivingBackdropConfig {
+  const theme = EMOTION_THEMES[emotion] ?? EMOTION_THEMES['서운함'];
+  const factor = MODE_PACE_MULTIPLIER[mode] ?? 1.0;
+
+  return {
+    laneDurationSec: Number((3.6 * factor).toFixed(2)),
+    lampsDurationSec: Number((16 * factor).toFixed(2)),
+    horizonDurationSec: Number((42 * factor).toFixed(2)),
+    lightDurationSec: Number((22 * factor).toFixed(2)),
+    skyTop: theme.bgPage,
+    skyBottom: theme.bgSubtle,
+    horizonFill: theme.border,
+    hillFill: theme.accentSoft,
+    roadSurface: theme.textPrimary,
+    laneDashColor: theme.accent,
+    lampGlowColor: emotion === '화남' || emotion === '지침' ? '#F5C48D' : '#F6DEB3',
+    ambientRibbonA: theme.accentSoft,
+    ambientRibbonB: theme.accent,
+  };
+}
+

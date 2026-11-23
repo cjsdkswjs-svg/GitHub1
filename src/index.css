@@ -72,8 +72,113 @@ input[type="range"].gauge-slider::-moz-range-thumb {
   transition: transform 150ms ease;
 }
 
+@keyframes driving-light-drift-a {
+  0% {
+    transform: translate3d(-8%, -4%, 0) scale(1);
+    opacity: 0.45;
+  }
+  50% {
+    transform: translate3d(8%, 4%, 0) scale(1.08);
+    opacity: 0.72;
+  }
+  100% {
+    transform: translate3d(-8%, -4%, 0) scale(1);
+    opacity: 0.45;
+  }
+}
+
+@keyframes driving-light-drift-b {
+  0% {
+    transform: translate3d(10%, 3%, 0) scale(1.04);
+    opacity: 0.35;
+  }
+  50% {
+    transform: translate3d(-10%, -5%, 0) scale(0.96);
+    opacity: 0.62;
+  }
+  100% {
+    transform: translate3d(10%, 3%, 0) scale(1.04);
+    opacity: 0.35;
+  }
+}
+
+@keyframes driving-horizon-scroll {
+  0% {
+    transform: translate3d(0%, 0, 0);
+  }
+  100% {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+@keyframes driving-lane-scroll {
+  0% {
+    transform: translate3d(0, -50%, 0);
+  }
+  100% {
+    transform: translate3d(0, 0%, 0);
+  }
+}
+
+@keyframes driving-cabin-glint {
+  0% {
+    transform: translate3d(-35%, 0, 0);
+    opacity: 0;
+  }
+  25% {
+    opacity: 0.55;
+  }
+  75% {
+    opacity: 0.45;
+  }
+  100% {
+    transform: translate3d(115%, 0, 0);
+    opacity: 0;
+  }
+}
+
+.driving-anim-light-a {
+  animation: driving-light-drift-a var(--drive-light-duration, 22s) ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.driving-anim-light-b {
+  animation: driving-light-drift-b calc(var(--drive-light-duration, 22s) * 1.25) ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.driving-anim-horizon {
+  animation: driving-horizon-scroll var(--drive-horizon-duration, 42s) linear infinite;
+  will-change: transform;
+}
+
+.driving-anim-lamps {
+  animation: driving-horizon-scroll var(--drive-lamps-duration, 16s) linear infinite;
+  will-change: transform;
+}
+
+.driving-anim-lane {
+  animation: driving-lane-scroll var(--drive-lane-duration, 3.6s) linear infinite;
+  will-change: transform;
+}
+
+.driving-anim-glint {
+  animation: driving-cabin-glint calc(var(--drive-lamps-duration, 16s) * 0.75) ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .theme-transition {
     transition: none;
   }
+
+  .driving-anim-light-a,
+  .driving-anim-light-b,
+  .driving-anim-horizon,
+  .driving-anim-lamps,
+  .driving-anim-lane,
+  .driving-anim-glint {
+    animation: none !important;
+  }
 }
+

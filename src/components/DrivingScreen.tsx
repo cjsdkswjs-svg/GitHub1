@@ -24,6 +24,7 @@ import {
   EmotionTheme,
   getDrivingModeOption,
 } from '../lib/daeriLogic';
+import { DrivingRoadBackdrop } from './DrivingRoadBackdrop';
 
 interface DrivingScreenProps {
   input: BoardingInput;
@@ -128,12 +129,15 @@ export function DrivingScreen({
   };
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
-      {/* Top Ride Control & Mode Selector Card */}
-      <section
-        className="theme-transition rounded-3xl border bg-white p-5 sm:p-6 shadow-sm space-y-5"
-        style={{ borderColor: theme.border }}
-      >
+    <>
+      <DrivingRoadBackdrop theme={theme} mode={mode} isReplying={isReplying} />
+
+      <div className="relative z-10 mx-auto max-w-6xl space-y-5">
+        {/* Top Ride Control & Mode Selector Card */}
+        <section
+          className="theme-transition rounded-3xl border bg-white/90 backdrop-blur-md p-5 sm:p-6 shadow-sm space-y-5"
+          style={{ borderColor: theme.border }}
+        >
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3.5 min-w-0">
             {avatarFailed ? (
@@ -273,14 +277,31 @@ export function DrivingScreen({
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-12 items-start">
         {/* Main Chat Bubble Card */}
         <section
-          className="theme-transition order-2 lg:order-1 lg:col-span-8 rounded-3xl border bg-white shadow-sm flex flex-col overflow-hidden"
+          className="theme-transition order-2 lg:order-1 lg:col-span-8 relative rounded-3xl border bg-white/90 backdrop-blur-md shadow-sm flex flex-col overflow-hidden"
           style={{ borderColor: theme.border }}
           aria-label="기사님과의 운행 대화"
         >
+          {/* Subtle Passing Windshield Light Sheen */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 top-0 h-20 overflow-hidden"
+            style={{
+              ['--drive-lamps-duration' as string]:
+                mode === 'listen' ? '20s' : mode === 'perspective' ? '13.6s' : '16s',
+            }}
+          >
+            <div
+              className="driving-anim-glint h-full w-1/2 blur-xl"
+              style={{
+                background: `linear-gradient(90deg, transparent 0%, ${theme.accentSoft}88 50%, transparent 100%)`,
+              }}
+            />
+          </div>
+
           {/* Scrollable Message Bubbles */}
           <div
             aria-live="polite"
-            className="flex-1 space-y-4 overflow-y-auto p-5 sm:p-6 min-h-[280px] max-h-[420px]"
+            className="relative z-10 flex-1 space-y-4 overflow-y-auto p-5 sm:p-6 min-h-[280px] max-h-[420px]"
           >
             {messages.map((msg) => {
               const isDriver = msg.role === 'driver';
@@ -478,7 +499,7 @@ export function DrivingScreen({
         {/* Driving Log Summary Sidebar */}
         <aside
           aria-label="운행 일지 요약"
-          className="theme-transition order-1 lg:order-2 lg:col-span-4 lg:sticky lg:top-6 rounded-3xl border bg-white shadow-sm overflow-hidden"
+          className="theme-transition order-1 lg:order-2 lg:col-span-4 lg:sticky lg:top-6 rounded-3xl border bg-white/90 backdrop-blur-md shadow-sm overflow-hidden"
           style={{ borderColor: theme.border }}
         >
           {/* Sidebar Header */}
@@ -767,6 +788,7 @@ export function DrivingScreen({
           </div>
         </aside>
       </div>
-    </div>
+      </div>
+    </>
   );
 }

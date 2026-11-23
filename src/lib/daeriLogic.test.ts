@@ -8,6 +8,7 @@ import {
   detectSafetySignal,
   DRIVING_MODES,
   formatKoreanDateLabel,
+  getDrivingBackdropConfig,
   getDrivingModeOption,
   getEmotionTheme,
   loadMindDiaryEntries,
@@ -258,3 +259,16 @@ test('MindDiary validation, upsert, remove, and storage persistence work reliabl
   assert.equal(removed.length, 1);
   assert.equal(removed[0].dateKey, '2026-11-21');
 });
+
+test('getDrivingBackdropConfig adapts pacing by driving mode and colors by emotion', () => {
+  const listenCfg = getDrivingBackdropConfig('서운함', 'listen');
+  const organizeCfg = getDrivingBackdropConfig('서운함', 'organize');
+  const perspectiveCfg = getDrivingBackdropConfig('불안함', 'perspective');
+
+  assert.ok(listenCfg.laneDurationSec > organizeCfg.laneDurationSec);
+  assert.ok(organizeCfg.laneDurationSec > perspectiveCfg.laneDurationSec);
+  assert.ok(listenCfg.horizonDurationSec > listenCfg.lampsDurationSec);
+  assert.notEqual(listenCfg.skyTop, perspectiveCfg.skyTop);
+  assert.ok(perspectiveCfg.laneDashColor.startsWith('#'));
+});
+

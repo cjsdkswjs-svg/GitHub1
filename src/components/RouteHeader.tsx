@@ -61,7 +61,7 @@ export function RouteHeader({
 
   return (
     <header
-      className="theme-transition border-b backdrop-blur-md"
+      className="theme-transition relative z-20 border-b backdrop-blur-md"
       style={{
         backgroundColor: 'rgba(255, 255, 255, 0.86)',
         borderColor: theme.border,

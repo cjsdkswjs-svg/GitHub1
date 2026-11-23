@@ -448,7 +448,7 @@ export default function App() {
         theme={theme}
       />
 
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-7 sm:px-6 sm:py-10">
+      <main className="relative z-10 mx-auto w-full max-w-6xl flex-1 px-4 py-7 sm:px-6 sm:py-10">
         {safetyBlock ? (
           <SafetyNoticeCard
             assessment={safetyBlock}
@@ -510,10 +510,10 @@ export default function App() {
       </main>
 
       <footer
-        className="theme-transition border-t px-4 py-5 sm:px-6"
+        className="theme-transition relative z-20 border-t px-4 py-5 sm:px-6"
         style={{
           borderColor: theme.border,
-          backgroundColor: 'rgba(255, 255, 255, 0.55)',
+          backgroundColor: 'rgba(255, 255, 255, 0.78)',
         }}
       >
         <div
