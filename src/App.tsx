@@ -123,7 +123,7 @@ export default function App() {
       return;
     }
 
-    rideSessionRef.current += 1;
+    const capturedSession = ++rideSessionRef.current;
     setSafetyBlock(null);
     setStage(2);
     setIsAnalyzing(true);
@@ -148,6 +148,8 @@ export default function App() {
         analysis?: unknown;
         error?: string;
       };
+
+      if (capturedSession !== rideSessionRef.current) return;
 
       if (payload.status === 'safety_blocked' && payload.safetyLevel) {
         const level = payload.safetyLevel;
@@ -179,6 +181,7 @@ export default function App() {
       const parsed = parseAnalystResult(rawString);
       setAnalysis(parsed);
     } catch (err: unknown) {
+      if (capturedSession !== rideSessionRef.current) return;
       const message =
         err instanceof Error
           ? err.message
@@ -186,7 +189,9 @@ export default function App() {
       setAnalyzeError(message);
       setAnalysis(null);
     } finally {
-      setIsAnalyzing(false);
+      if (capturedSession === rideSessionRef.current) {
+        setIsAnalyzing(false);
+      }
     }
   };
 
@@ -203,6 +208,7 @@ export default function App() {
     historyForServer: ChatMessage[],
     activeMode: DrivingMode,
   ) => {
+    const capturedSession = rideSessionRef.current;
     setIsReplying(true);
     setReplyError(null);
     setLastPendingText(userText);
@@ -226,6 +232,8 @@ export default function App() {
         reply?: string;
         error?: string;
       };
+
+      if (capturedSession !== rideSessionRef.current) return;
 
       if (payload.status === 'safety_blocked' && payload.safetyLevel) {
         const level = payload.safetyLevel;
@@ -259,17 +267,21 @@ export default function App() {
       setMessages((prev) => [...prev, driverMsg]);
       setLastPendingText(null);
     } catch (err: unknown) {
+      if (capturedSession !== rideSessionRef.current) return;
       const msg =
         err instanceof Error
           ? err.message
           : '응답을 받는 중 잠시 오류가 생겼습니다. 다시 보내 보시겠어요?';
       setReplyError(msg);
     } finally {
-      setIsReplying(false);
+      if (capturedSession === rideSessionRef.current) {
+        setIsReplying(false);
+      }
     }
   };
 
   const handleSendMessage = (text: string) => {
+    if (isReplying) return;
     const check = validateChatMessage(text);
     if (!check.valid) return;
 
@@ -294,8 +306,20 @@ export default function App() {
 
   const handleRetryLastMessage = () => {
     if (!lastPendingText || isReplying) return;
-    const historyWithoutLastUser = messages.slice(0, -1);
-    void dispatchDriveReply(lastPendingText, historyWithoutLastUser, drivingMode);
+    const lastMsg = messages[messages.length - 1];
+    const historyBeforeLast =
+      lastMsg?.role === 'user' ? messages.slice(0, -1) : messages;
+    void dispatchDriveReply(lastPendingText, historyBeforeLast, drivingMode);
+  };
+
+  const handleChangeDrivingMode = (nextMode: DrivingMode) => {
+    setDrivingMode(nextMode);
+    setMessages((prev) => {
+      if (prev.length === 1 && prev[0].role === 'driver') {
+        return [createInitialDriverGreeting(input, analysis, nextMode)];
+      }
+      return prev;
+    });
   };
 
   const requestDriveSummary = useCallback(
@@ -387,7 +411,9 @@ export default function App() {
     setInput(INITIAL_INPUT);
     setAnalysis(null);
     setAnalyzeError(null);
+    setDrivingMode('listen');
     setMessages([]);
+    setIsReplying(false);
     setReplyError(null);
     setLastPendingText(null);
     setHasArrived(false);
@@ -438,10 +464,23 @@ export default function App() {
       <RouteHeader
         currentStage={stage}
         canAccessStage2={Boolean(analysis) || isAnalyzing || Boolean(analyzeError)}
-        canAccessStage3={Boolean(analysis) || messages.length > 0}
+        canAccessStage3={Boolean(analysis) || Boolean(analyzeError) || messages.length > 0}
         canAccessStage4={hasArrived}
         isDiaryOpen={isDiaryOpen}
-        onSelectStage={(target) => setStage(target)}
+        onSelectStage={(target) => {
+          if (safetyBlock) {
+            if (safetyBlock.level === 'crisis') {
+              handleStartNewRide();
+              return;
+            }
+            setSafetyBlock(null);
+          }
+          if (target === 3 && messages.length === 0) {
+            handleStartDriving();
+            return;
+          }
+          setStage(target);
+        }}
         onOpenDiary={() => setIsDiaryOpen((prev) => !prev)}
         fontScale={fontScale}
         onChangeFontScale={setFontScale}
@@ -489,7 +528,7 @@ export default function App() {
             isSummarizing={isSummarizing}
             summaryError={summaryError}
             lastSummarizedCount={lastSummarizedCount}
-            onChangeMode={setDrivingMode}
+            onChangeMode={handleChangeDrivingMode}
             onSendMessage={handleSendMessage}
             onRetryLastMessage={handleRetryLastMessage}
             onRefreshSummary={() => void requestDriveSummary(messages)}

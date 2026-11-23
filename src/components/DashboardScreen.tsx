@@ -113,14 +113,17 @@ export function DashboardScreen({
           >
             <AlertTriangle className="h-6 w-6" />
           </div>
-          <div className="space-y-2">
+          <div className="min-w-0 flex-1 space-y-2">
             <h2
-              className="font-diary text-xl font-bold"
+              className="font-diary text-xl font-bold break-words"
               style={{ color: theme.textPrimary }}
             >
               계기판 신호를 잠시 읽어오지 못했어요
             </h2>
-            <p className="text-sm leading-relaxed" style={{ color: theme.textSecondary }}>
+            <p
+              className="text-sm leading-relaxed break-words"
+              style={{ color: theme.textSecondary }}
+            >
               {errorMessage ||
                 '분석 데이터를 확인하지 못했습니다. 다시 한 번 점검해 주세요.'}
             </p>
@@ -130,9 +133,21 @@ export function DashboardScreen({
         <div className="mt-6 flex flex-wrap gap-3">
           <button
             type="button"
-            onClick={onRetryAnalyze}
-            className="inline-flex min-h-[44px] items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold text-white cursor-pointer hover:opacity-90"
+            onClick={onStartDriving}
+            className="inline-flex min-h-[44px] items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold text-white whitespace-nowrap shrink-0 cursor-pointer hover:opacity-90"
             style={{ backgroundColor: theme.accent }}
+          >
+            <span>계기판 없이 바로 운행 시작하기</span>
+            <ArrowRight className="h-4 w-4" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            onClick={onRetryAnalyze}
+            className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold whitespace-nowrap shrink-0 cursor-pointer hover:bg-black/5"
+            style={{
+              borderColor: theme.border,
+              color: theme.textPrimary,
+            }}
           >
             <RefreshCw className="h-4 w-4" aria-hidden="true" />
             <span>다시 점검하기</span>
@@ -140,14 +155,14 @@ export function DashboardScreen({
           <button
             type="button"
             onClick={onBackToBoarding}
-            className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border px-5 py-2.5 text-sm font-semibold cursor-pointer hover:bg-black/5"
+            className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold whitespace-nowrap shrink-0 cursor-pointer hover:bg-black/5"
             style={{
               borderColor: theme.border,
-              color: theme.textPrimary,
+              color: theme.textSecondary,
             }}
           >
             <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-            <span>탑승 화면으로 돌아가기</span>
+            <span>탑승 화면으로</span>
           </button>
         </div>
       </section>

@@ -110,7 +110,12 @@ export function DrivingScreen({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+    if (
+      e.key === 'Enter' &&
+      !e.shiftKey &&
+      !e.nativeEvent.isComposing &&
+      e.nativeEvent.keyCode !== 229
+    ) {
       e.preventDefault();
       if (!isReplying) {
         handleSubmit();
@@ -382,7 +387,7 @@ export function DrivingScreen({
                 role="alert"
                 className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
               >
-                <p>{replyError}</p>
+                <p className="min-w-0 flex-1 break-words">{replyError}</p>
                 <button
                   type="button"
                   onClick={onRetryLastMessage}
@@ -648,7 +653,7 @@ export function DrivingScreen({
                   role="alert"
                   className="rounded-2xl border border-amber-300 bg-amber-50 p-3.5 text-xs text-amber-950 space-y-2.5"
                 >
-                  <p className="leading-relaxed">{summaryError}</p>
+                  <p className="leading-relaxed break-words">{summaryError}</p>
                   <button
                     type="button"
                     onClick={onRefreshSummary}

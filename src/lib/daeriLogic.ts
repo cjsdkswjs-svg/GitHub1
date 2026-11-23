@@ -427,10 +427,10 @@ export function validateBoardingInput(input: BoardingInput): ValidationResult {
       error: '고민 내용을 한 줄이라도 들려주시면 계기판을 점검해 드릴게요.',
     };
   }
-  if (trimmed.length < 8) {
+  if (trimmed.length < 4) {
     return {
       valid: false,
-      error: '조금만 더 상황을 들려주시면 마음 계기판을 정확히 읽을 수 있어요. (8자 이상)',
+      error: '조금만 더 상황을 들려주시면 마음 계기판을 정확히 읽을 수 있어요. (4자 이상)',
     };
   }
   if (trimmed.length > 1500) {
@@ -904,4 +904,59 @@ export function getDrivingBackdropConfig(
     ambientRibbonB: theme.accent,
   };
 }
+
+export function isQuotaExhaustedMessage(rawMessage: string): boolean {
+  return /RESOURCE_EXHAUSTED|exceeded your current quota|quota|GenerateRequestsPerDay|"code"\s*:\s*429|\b429\b/i.test(
+    rawMessage,
+  );
+}
+
+export function formatGeminiUserError(
+  err: unknown,
+  context: 'analyze' | 'drive' | 'summary',
+): { statusCode: number; message: string } {
+  const raw = err instanceof Error ? err.message : String(err ?? '');
+
+  if (isQuotaExhaustedMessage(raw)) {
+    return {
+      statusCode: 429,
+      message:
+        '오늘 AI 응답 이용 한도가 잠시 모두 소진되어 쉬어가고 있어요. 잠시 후 다시 시도해 주세요.',
+    };
+  }
+
+  if (/GEMINI_API_KEY|API_KEY_INVALID|API key not valid|PERMISSION_DENIED|\b401\b|\b403\b/i.test(raw)) {
+    return {
+      statusCode: 503,
+      message:
+        'AI 연결 설정을 확인하는 데 시간이 걸리고 있어요. 잠시 후 다시 시도해 주세요.',
+    };
+  }
+
+  if (/UNAVAILABLE|DEADLINE_EXCEEDED|ETIMEDOUT|ECONNRESET|\b502\b|\b503\b|\b504\b/i.test(raw)) {
+    return {
+      statusCode: 503,
+      message:
+        '잠시 응답 도로가 혼잡해 연결이 지연되고 있어요. 잠시 후 다시 눌러 주세요.',
+    };
+  }
+
+  if (context === 'analyze') {
+    return {
+      statusCode: 500,
+      message: '계기판을 살피는 중 일시적인 오류가 생겼습니다. 다시 한 번 점검해 주세요.',
+    };
+  }
+  if (context === 'summary') {
+    return {
+      statusCode: 500,
+      message: '운행 일지를 정리하는 중 일시적인 오류가 생겼습니다. 다시 시도해 주세요.',
+    };
+  }
+  return {
+    statusCode: 500,
+    message: '기사님의 답변을 불러오는 중 잠시 오류가 생겼습니다. 다시 보내 보시겠어요?',
+  };
+}
+
 

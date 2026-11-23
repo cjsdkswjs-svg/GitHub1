@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, BookOpen, CarFront, Lock } from 'lucide-react';
 import {
   BoardingInput,
@@ -36,6 +36,14 @@ export function BoardingScreen({
   onSubmit,
 }: BoardingScreenProps) {
   const [avatarFailed, setAvatarFailed] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    if (validationError && textareaRef.current) {
+      textareaRef.current.focus();
+      textareaRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [validationError]);
 
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -378,6 +386,7 @@ export function BoardingScreen({
             </div>
 
             <textarea
+              ref={textareaRef}
               id="concern-textarea"
               rows={5}
               maxLength={1500}

@@ -7,10 +7,12 @@ import {
   createInitialDriverGreeting,
   detectSafetySignal,
   DRIVING_MODES,
+  formatGeminiUserError,
   formatKoreanDateLabel,
   getDrivingBackdropConfig,
   getDrivingModeOption,
   getEmotionTheme,
+  isQuotaExhaustedMessage,
   loadMindDiaryEntries,
   MIND_DIARY_STORAGE_KEY,
   MindDiaryEntry,
@@ -53,9 +55,17 @@ test('validateBoardingInput rejects empty or overly short concerns', () => {
     category: '친구 관계',
     emotion: '서운함',
     intensity: 5,
-    concernText: '힘들어요',
+    concernText: '힘듦',
   });
   assert.equal(shortRes.valid, false);
+
+  const briefKoreanRes = validateBoardingInput({
+    category: '친구 관계',
+    emotion: '서운함',
+    intensity: 5,
+    concernText: '친구가 서운해요',
+  });
+  assert.equal(briefKoreanRes.valid, true);
 
   const validRes = validateBoardingInput({
     category: '공부·진로',
@@ -271,4 +281,24 @@ test('getDrivingBackdropConfig adapts pacing by driving mode and colors by emoti
   assert.notEqual(listenCfg.skyTop, perspectiveCfg.skyTop);
   assert.ok(perspectiveCfg.laneDashColor.startsWith('#'));
 });
+
+test('formatGeminiUserError masks raw JSON/quota errors behind friendly Korean guidance', () => {
+  const raw429 = JSON.stringify({
+    error: {
+      code: 429,
+      message: 'You exceeded your current quota https://aistudio.google.com/docs/rate-limits',
+      status: 'RESOURCE_EXHAUSTED',
+    },
+  });
+  assert.equal(isQuotaExhaustedMessage(raw429), true);
+  const formatted429 = formatGeminiUserError(new Error(raw429), 'analyze');
+  assert.equal(formatted429.statusCode, 429);
+  assert.ok(!formatted429.message.includes('RESOURCE_EXHAUSTED'));
+  assert.ok(!formatted429.message.includes('http'));
+
+  const formattedUnknown = formatGeminiUserError(new Error('Internal failure'), 'drive');
+  assert.equal(formattedUnknown.statusCode, 500);
+  assert.ok(formattedUnknown.message.includes('기사님'));
+});
+
 

@@ -3,6 +3,14 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
+import {
+  extractJsonString,
+  formatGeminiUserError,
+  isQuotaExhaustedMessage,
+} from './src/lib/daeriLogic.ts';
+
+const PRIMARY_MODEL = 'gemini-4-hydrogen';
+const FALLBACK_MODEL = 'gemini-3.1-flash-lite';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,6 +41,9 @@ async function withGeminiRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promis
     } catch (err: unknown) {
       lastError = err;
       const msg = err instanceof Error ? err.message : String(err);
+      if (isQuotaExhaustedMessage(msg) && /GenerateRequestsPerDay|exceeded your current quota/i.test(msg)) {
+        throw err;
+      }
       const isTransient =
         /500|502|503|504|429|UNAVAILABLE|RESOURCE_EXHAUSTED|DEADLINE_EXCEEDED|ECONNRESET|ETIMEDOUT/i.test(
           msg,
@@ -45,6 +56,24 @@ async function withGeminiRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promis
     }
   }
   throw lastError;
+}
+
+async function generateWithModelFallback(
+  ai: GoogleGenAI,
+  callForModel: (model: string) => Promise<{ text?: string }>,
+) {
+  try {
+    return await withGeminiRetry(() => callForModel(PRIMARY_MODEL));
+  } catch (primaryErr: unknown) {
+    const msg = primaryErr instanceof Error ? primaryErr.message : String(primaryErr);
+    const shouldTryFallback =
+      isQuotaExhaustedMessage(msg) ||
+      /UNAVAILABLE|DEADLINE_EXCEEDED|NOT_FOUND|\b502\b|\b503\b|\b504\b/i.test(msg);
+    if (!shouldTryFallback) {
+      throw primaryErr;
+    }
+    return await withGeminiRetry(() => callForModel(FALLBACK_MODEL), 2);
+  }
 }
 
 const CRISIS_PATTERNS: RegExp[] = [
@@ -122,7 +151,7 @@ async function startServer() {
       }
 
       const trimmedText = concernText.trim();
-      if (trimmedText.length < 8) {
+      if (trimmedText.length < 4) {
         return res.status(400).json({
           error: '조금만 더 구체적으로 적어 주시면 계기판을 정확히 점검할 수 있어요.',
         });
@@ -146,9 +175,9 @@ async function startServer() {
         `고민 내용:\n${trimmedText}`,
       ].join('\n');
 
-      const response = await withGeminiRetry(() =>
+      const response = await generateWithModelFallback(ai, (model) =>
         ai.models.generateContent({
-          model: 'gemini-4-hydrogen',
+          model,
           contents: userPrompt,
           config: {
             systemInstruction: ANALYST_SYSTEM_INSTRUCTION,
@@ -195,11 +224,10 @@ async function startServer() {
 
       let parsed: unknown;
       try {
-        parsed = JSON.parse(rawText);
+        parsed = JSON.parse(extractJsonString(rawText));
       } catch {
         return res.status(502).json({
           error: '계기판 분석 결과를 JSON으로 해석하지 못했습니다. 다시 시도해 주세요.',
-          rawText,
         });
       }
 
@@ -208,11 +236,10 @@ async function startServer() {
         analysis: parsed,
       });
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : '계기판 분석 중 알 수 없는 오류가 발생했습니다.';
       console.error('[/api/analyze] error:', err);
-      return res.status(500).json({
-        error: `계기판 점검에 잠시 문제가 생겼습니다: ${message}`,
+      const formatted = formatGeminiUserError(err, 'analyze');
+      return res.status(formatted.statusCode).json({
+        error: formatted.message,
       });
     }
   });
@@ -308,9 +335,9 @@ ${modeInstructions[safeMode]}`;
       contextParts.push(`위 맥락을 바탕으로 '기사님'으로서 1~3문장으로 응답하세요.`);
 
       const ai = createGeminiClient();
-      const response = await withGeminiRetry(() =>
+      const response = await generateWithModelFallback(ai, (model) =>
         ai.models.generateContent({
-          model: 'gemini-4-hydrogen',
+          model,
           contents: contextParts.join('\n\n'),
           config: {
             systemInstruction: driverSystemInstruction,
@@ -331,11 +358,10 @@ ${modeInstructions[safeMode]}`;
         reply: replyText,
       });
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : '대화 처리 중 알 수 없는 오류가 발생했습니다.';
       console.error('[/api/drive] error:', err);
-      return res.status(500).json({
-        error: `잠시 도로 사정이 고르지 않아 응답이 늦어졌어요: ${message}`,
+      const formatted = formatGeminiUserError(err, 'drive');
+      return res.status(formatted.statusCode).json({
+        error: formatted.message,
       });
     }
   });
@@ -414,9 +440,9 @@ ${modeInstructions[safeMode]}`;
       promptParts.push(`[지금까지의 운행 대화 기록]\n${transcript}`);
 
       const ai = createGeminiClient();
-      const response = await withGeminiRetry(() =>
+      const response = await generateWithModelFallback(ai, (model) =>
         ai.models.generateContent({
-          model: 'gemini-4-hydrogen',
+          model,
           contents: promptParts.join('\n\n'),
           config: {
             systemInstruction: summarySystemInstruction,
@@ -458,7 +484,7 @@ ${modeInstructions[safeMode]}`;
 
       let parsed: unknown;
       try {
-        parsed = JSON.parse(rawText);
+        parsed = JSON.parse(extractJsonString(rawText));
       } catch {
         return res.status(502).json({
           error: '운행 일지 요약을 JSON으로 해석하지 못했습니다. 다시 시도해 주세요.',
@@ -470,11 +496,10 @@ ${modeInstructions[safeMode]}`;
         summary: parsed,
       });
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : '운행 일지 요약 중 알 수 없는 오류가 발생했습니다.';
       console.error('[/api/drive-summary] error:', err);
-      return res.status(500).json({
-        error: `운행 일지 요약에 잠시 문제가 생겼습니다: ${message}`,
+      const formatted = formatGeminiUserError(err, 'summary');
+      return res.status(formatted.statusCode).json({
+        error: formatted.message,
       });
     }
   });
