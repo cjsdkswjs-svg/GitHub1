@@ -352,13 +352,18 @@ export function parseDriveLogSummary(rawText: string): DriveLogSummary {
   const nextFocus =
     typeof record.nextFocus === 'string' ? record.nextFocus.trim() : '';
 
-  const keyPoints = Array.isArray(record.keyPoints)
+  const rawKeyPoints = Array.isArray(record.keyPoints)
     ? record.keyPoints
         .filter((item): item is string => typeof item === 'string')
         .map((s) => s.trim())
         .filter(Boolean)
-        .slice(0, 4)
-    : [];
+    : typeof record.keyPoints === 'string'
+      ? record.keyPoints
+          .split(/\n|•|·|- /)
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : [];
+  const keyPoints = rawKeyPoints.slice(0, 4);
 
   if (!currentTopic || !recentFlow || keyPoints.length === 0) {
     throw new Error('운행 일지 요약의 핵심 항목이 비어 있습니다.');
@@ -544,14 +549,25 @@ export function parseAnalystResult(rawText: string): AnalystResult {
         .filter((item): item is string => typeof item === 'string')
         .map((s) => s.trim())
         .filter(Boolean)
-    : [];
+    : typeof record.emotions === 'string'
+      ? record.emotions
+          .split(/[,·/|]+/)
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : [];
 
   if (rawEmotions.length === 0) {
     throw new Error('감정 단어를 읽어오지 못했습니다.');
   }
   const emotions = rawEmotions.slice(0, 3);
 
-  const rawIntensity = Number(record.intensity);
+  let rawIntensity = Number(record.intensity);
+  if (!Number.isFinite(rawIntensity) && typeof record.intensity === 'string') {
+    const match = record.intensity.match(/\d+/);
+    if (match) {
+      rawIntensity = Number(match[0]);
+    }
+  }
   if (!Number.isFinite(rawIntensity)) {
     throw new Error('감정 강도 수치를 읽어오지 못했습니다.');
   }
@@ -570,7 +586,12 @@ export function parseAnalystResult(rawText: string): AnalystResult {
         .filter((item): item is string => typeof item === 'string')
         .map((s) => s.trim())
         .filter(Boolean)
-    : [];
+    : typeof record.values === 'string'
+      ? record.values
+          .split(/\s*(?:vs|VS|,|·|\/)\s*/)
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : [];
 
   if (values.length === 0) {
     throw new Error('충돌하는 가치 항목을 읽어오지 못했습니다.');
@@ -927,7 +948,7 @@ export function formatGeminiUserError(
 
   if (/GEMINI_API_KEY|API_KEY_INVALID|API key not valid|PERMISSION_DENIED|\b401\b|\b403\b/i.test(raw)) {
     return {
-      statusCode: 503,
+      statusCode: 500,
       message:
         'AI 연결 설정을 확인하는 데 시간이 걸리고 있어요. 잠시 후 다시 시도해 주세요.',
     };
@@ -935,7 +956,7 @@ export function formatGeminiUserError(
 
   if (/UNAVAILABLE|DEADLINE_EXCEEDED|ETIMEDOUT|ECONNRESET|\b502\b|\b503\b|\b504\b/i.test(raw)) {
     return {
-      statusCode: 503,
+      statusCode: 500,
       message:
         '잠시 응답 도로가 혼잡해 연결이 지연되고 있어요. 잠시 후 다시 눌러 주세요.',
     };
@@ -968,13 +989,23 @@ function getFriendlyHttpFallback(status: number, fallbackMessage: string): strin
   if (status === 404) {
     return '연결 경로를 찾지 못했어요. 페이지를 새로고침한 뒤 다시 시도해 주세요.';
   }
+  if (status === 401 || status === 403) {
+    return '미리보기 연결 인증이 잠시 만료되었어요. 화면을 새로고침한 뒤 다시 시도해 주세요.';
+  }
   if (status === 408 || status === 502 || status === 503 || status === 504 || status >= 500) {
     return '잠시 응답 도로가 혼잡해 연결이 지연되고 있어요. 잠시 후 다시 시도해 주세요.';
   }
   return fallbackMessage;
 }
 
-export function shouldRetryProxyResponse(status: number, rawText: string): boolean {
+export function shouldRetryProxyResponse(
+  status: number,
+  rawText: string,
+  responseType?: string,
+): boolean {
+  if (responseType === 'opaqueredirect') {
+    return false;
+  }
   if (status === 408 || status === 502 || status === 503 || status === 504) {
     return true;
   }

@@ -4,9 +4,10 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import {
-  extractJsonString,
   formatGeminiUserError,
   isQuotaExhaustedMessage,
+  parseAnalystResult,
+  parseDriveLogSummary,
 } from './src/lib/daeriLogic.ts';
 
 const PRIMARY_MODEL = 'gemini-4-hydrogen';
@@ -33,7 +34,11 @@ function createGeminiClient(): GoogleGenAI {
   });
 }
 
-async function withGeminiRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promise<T> {
+async function withGeminiRetry<T>(
+  fn: () => Promise<T>,
+  maxAttempts = 3,
+  skipQuotaRetry = false,
+): Promise<T> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
@@ -41,7 +46,11 @@ async function withGeminiRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promis
     } catch (err: unknown) {
       lastError = err;
       const msg = err instanceof Error ? err.message : String(err);
-      if (isQuotaExhaustedMessage(msg) && /GenerateRequestsPerDay|exceeded your current quota/i.test(msg)) {
+      if (
+        (skipQuotaRetry && isQuotaExhaustedMessage(msg)) ||
+        (isQuotaExhaustedMessage(msg) &&
+          /GenerateRequestsPerDay|exceeded your current quota/i.test(msg))
+      ) {
         throw err;
       }
       const isTransient =
@@ -51,30 +60,64 @@ async function withGeminiRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promis
       if (!isTransient || attempt === maxAttempts) {
         throw err;
       }
-      const delayMs = 600 * attempt;
+      const jitter = Math.floor(Math.random() * 250);
+      const delayMs = 650 * attempt + jitter;
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }
   throw lastError;
 }
 
-const PRIMARY_QUOTA_COOLDOWN_MS = 5 * 60 * 1000;
+const PRIMARY_QUOTA_COOLDOWN_MS = 60 * 60 * 1000;
+const TRANSIENT_PRIMARY_COOLDOWN_MS = 5 * 60 * 1000;
+const GEMINI_CALL_TIMEOUT_MS = 16000;
 let primaryQuotaCooldownUntil = 0;
 
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`DEADLINE_EXCEEDED: ${label} timed out after ${ms}ms`));
+        }, ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+interface GeminiCallResult {
+  text?: string;
+  candidates?: Array<{ finishReason?: unknown }>;
+}
+
 async function generateWithModelFallback(
-  ai: GoogleGenAI,
-  callForModel: (model: string) => Promise<{ text?: string }>,
-) {
+  _ai: GoogleGenAI,
+  callForModel: (model: string) => Promise<GeminiCallResult>,
+): Promise<GeminiCallResult> {
   if (Date.now() < primaryQuotaCooldownUntil) {
-    return await withGeminiRetry(() => callForModel(FALLBACK_MODEL), 2);
+    return await withGeminiRetry(
+      () => withTimeout(callForModel(FALLBACK_MODEL), GEMINI_CALL_TIMEOUT_MS, FALLBACK_MODEL),
+      3,
+      false,
+    );
   }
 
   try {
-    return await withGeminiRetry(() => callForModel(PRIMARY_MODEL));
+    return await withGeminiRetry(
+      () => withTimeout(callForModel(PRIMARY_MODEL), GEMINI_CALL_TIMEOUT_MS, PRIMARY_MODEL),
+      2,
+      true,
+    );
   } catch (primaryErr: unknown) {
     const msg = primaryErr instanceof Error ? primaryErr.message : String(primaryErr);
     if (isQuotaExhaustedMessage(msg)) {
-      primaryQuotaCooldownUntil = Date.now() + PRIMARY_QUOTA_COOLDOWN_MS;
+      const isDaily = /GenerateRequestsPerDay|exceeded your current quota/i.test(msg);
+      primaryQuotaCooldownUntil =
+        Date.now() + (isDaily ? PRIMARY_QUOTA_COOLDOWN_MS : TRANSIENT_PRIMARY_COOLDOWN_MS);
     }
     const shouldTryFallback =
       isQuotaExhaustedMessage(msg) ||
@@ -82,7 +125,11 @@ async function generateWithModelFallback(
     if (!shouldTryFallback) {
       throw primaryErr;
     }
-    return await withGeminiRetry(() => callForModel(FALLBACK_MODEL), 2);
+    return await withGeminiRetry(
+      () => withTimeout(callForModel(FALLBACK_MODEL), GEMINI_CALL_TIMEOUT_MS, FALLBACK_MODEL),
+      3,
+      false,
+    );
   }
 }
 
@@ -192,7 +239,10 @@ async function startServer() {
           config: {
             systemInstruction: ANALYST_SYSTEM_INSTRUCTION,
             responseMimeType: 'application/json',
-            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+            thinkingConfig: {
+              thinkingLevel:
+                model === FALLBACK_MODEL ? ThinkingLevel.MINIMAL : ThinkingLevel.LOW,
+            },
             responseSchema: {
               type: Type.OBJECT,
               properties: {
@@ -227,17 +277,17 @@ async function startServer() {
 
       const rawText = response.text;
       if (!rawText) {
-        return res.status(502).json({
+        return res.status(500).json({
           error: '계기판 분석 응답이 비어 있습니다. 잠시 후 다시 시도해 주세요.',
         });
       }
 
       let parsed: unknown;
       try {
-        parsed = JSON.parse(extractJsonString(rawText));
+        parsed = parseAnalystResult(rawText);
       } catch {
-        return res.status(502).json({
-          error: '계기판 분석 결과를 JSON으로 해석하지 못했습니다. 다시 시도해 주세요.',
+        return res.status(500).json({
+          error: '계기판 분석 결과를 정리하는 중 형식이 어긋났어요. 다시 한 번 점검해 주세요.',
         });
       }
 
@@ -351,14 +401,25 @@ ${modeInstructions[safeMode]}`;
           contents: contextParts.join('\n\n'),
           config: {
             systemInstruction: driverSystemInstruction,
-            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+            thinkingConfig: {
+              thinkingLevel:
+                model === FALLBACK_MODEL ? ThinkingLevel.MINIMAL : ThinkingLevel.LOW,
+            },
           },
         }),
       );
 
       const replyText = (response.text ?? '').trim();
       if (!replyText) {
-        return res.status(502).json({
+        const finishReason = String(response.candidates?.[0]?.finishReason ?? '');
+        if (/SAFETY|PROHIBITED_CONTENT|BLOCKLIST/i.test(finishReason)) {
+          return res.json({
+            status: 'ok',
+            reply:
+              '방금 꺼내 주신 이야기에는 조심스럽게 다뤄야 할 감정이 담겨 있네요. 자극적인 표현은 조금 덜어내고 지금 가장 힘들거나 서운한 마음의 핵심만 편하게 다시 들려주시겠어요?',
+          });
+        }
+        return res.status(500).json({
           error: '기사님의 답변을 불러오지 못했습니다. 다시 한 번 말씀해 주시겠어요?',
         });
       }
@@ -457,7 +518,10 @@ ${modeInstructions[safeMode]}`;
           config: {
             systemInstruction: summarySystemInstruction,
             responseMimeType: 'application/json',
-            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+            thinkingConfig: {
+              thinkingLevel:
+                model === FALLBACK_MODEL ? ThinkingLevel.MINIMAL : ThinkingLevel.LOW,
+            },
             responseSchema: {
               type: Type.OBJECT,
               properties: {
@@ -487,17 +551,17 @@ ${modeInstructions[safeMode]}`;
 
       const rawText = response.text;
       if (!rawText) {
-        return res.status(502).json({
+        return res.status(500).json({
           error: '운행 일지 요약 응답이 비어 있습니다. 다시 시도해 주세요.',
         });
       }
 
       let parsed: unknown;
       try {
-        parsed = JSON.parse(extractJsonString(rawText));
+        parsed = parseDriveLogSummary(rawText);
       } catch {
-        return res.status(502).json({
-          error: '운행 일지 요약을 JSON으로 해석하지 못했습니다. 다시 시도해 주세요.',
+        return res.status(500).json({
+          error: '운행 일지 요약을 정리하는 중 형식이 어긋났어요. 다시 시도해 주세요.',
         });
       }
 

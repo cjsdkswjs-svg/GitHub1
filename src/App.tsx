@@ -38,19 +38,43 @@ import {
   validateChatMessage,
 } from './lib/daeriLogic';
 
+async function refreshAuthBridgeSession(timeoutMs = 5000): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch('/api/health', {
+      method: 'GET',
+      credentials: 'include',
+      redirect: 'follow',
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
 async function postApiJsonWithRetry<T>(
   url: string,
   body: unknown,
   context: ApiRequestContext,
   fallbackError: string,
 ): Promise<{ status: number; ok: boolean; data: T }> {
-  const maxAttempts = 2;
+  const maxAttempts = 3;
+  const retryDelays = [700, 1400];
+  let refreshedAuthOnce = false;
+
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 25000);
+    const timeoutId = window.setTimeout(() => controller.abort(), 22000);
     try {
       const response = await fetch(url, {
         method: 'POST',
+        credentials: 'include',
+        redirect: 'manual',
         headers: {
           'Content-Type': 'application/json',
           Accept: 'application/json',
@@ -59,9 +83,26 @@ async function postApiJsonWithRetry<T>(
         signal: controller.signal,
       });
 
+      if (response.type === 'opaqueredirect') {
+        if (!refreshedAuthOnce && attempt < maxAttempts - 1) {
+          refreshedAuthOnce = true;
+          await refreshAuthBridgeSession();
+          continue;
+        }
+        throw new Error(
+          '미리보기 인증 세션이 잠시 만료되었어요. 화면을 새로고침한 뒤 다시 시도해 주세요.',
+        );
+      }
+
       const rawText = await response.text();
-      if (attempt < maxAttempts - 1 && shouldRetryProxyResponse(response.status, rawText)) {
-        await new Promise((resolve) => window.setTimeout(resolve, 700));
+      if (
+        attempt < maxAttempts - 1 &&
+        shouldRetryProxyResponse(response.status, rawText, response.type)
+      ) {
+        await new Promise((resolve) =>
+          window.setTimeout(resolve, retryDelays[attempt] ?? 1000),
+        );
+        await refreshAuthBridgeSession(3500);
         continue;
       }
 
@@ -69,10 +110,14 @@ async function postApiJsonWithRetry<T>(
       return { status: response.status, ok: response.ok, data };
     } catch (err: unknown) {
       const isAbort = err instanceof Error && err.name === 'AbortError';
-      if (!isAbort && attempt < maxAttempts - 1) {
-        const msg = err instanceof Error ? err.message : String(err ?? '');
+      const msg = err instanceof Error ? err.message : String(err ?? '');
+      const isAuthExpiry = /인증 세션|새로고침/.test(msg);
+      if (!isAbort && !isAuthExpiry && attempt < maxAttempts - 1) {
         if (/failed to fetch|networkerror|load failed|혼잡|연결 경로/i.test(msg)) {
-          await new Promise((resolve) => window.setTimeout(resolve, 700));
+          await new Promise((resolve) =>
+            window.setTimeout(resolve, retryDelays[attempt] ?? 1000),
+          );
+          await refreshAuthBridgeSession(3500);
           continue;
         }
       }
@@ -138,6 +183,27 @@ export default function App() {
       document.documentElement.style.fontSize = '';
     };
   }, [fontScale]);
+
+  // Keep shared-preview auth token cache warm while user is actively reading/typing
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void refreshAuthBridgeSession(3500);
+      }
+    }, 45000);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void refreshAuthBridgeSession(3500);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, []);
 
   const handleInputChange = (patch: Partial<BoardingInput>) => {
     setInput((prev) => ({ ...prev, ...patch }));
@@ -425,7 +491,10 @@ export default function App() {
       !summaryError &&
       shouldAutoSummarizeDrive(messages, lastSummarizedCount)
     ) {
-      void requestDriveSummary(messages);
+      const timer = window.setTimeout(() => {
+        void requestDriveSummary(messages);
+      }, 900);
+      return () => window.clearTimeout(timer);
     }
   }, [
     stage,

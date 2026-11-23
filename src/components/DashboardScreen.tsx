@@ -140,6 +140,20 @@ export function DashboardScreen({
             <span>계기판 없이 바로 운행 시작하기</span>
             <ArrowRight className="h-4 w-4" aria-hidden="true" />
           </button>
+          {errorMessage?.includes('새로고침') && (
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold whitespace-nowrap shrink-0 cursor-pointer hover:bg-black/5"
+              style={{
+                borderColor: theme.accent,
+                color: theme.accentText,
+              }}
+            >
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+              <span>화면 새로고침</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={onRetryAnalyze}

@@ -105,6 +105,19 @@ test('parseAnalystResult parses valid JSON and fenced JSON and clamps intensity'
   assert.deepEqual(parsed.emotions, ['서운함', '어색함', '조심스러움']);
   assert.equal(parsed.intensity, 10);
   assert.equal(parsed.values.length, 2);
+
+  const flexible = parseAnalystResult(
+    JSON.stringify({
+      emotions: '답답함, 망설임, 서운함',
+      intensity: '7점',
+      core: '먼저 말을 꺼내기가 어렵습니다.',
+      blindspot: '상대도 눈치를 보고 있을 수 있어요.',
+      values: '솔직한 표현 vs 관계의 평화',
+    }),
+  );
+  assert.deepEqual(flexible.emotions, ['답답함', '망설임', '서운함']);
+  assert.equal(flexible.intensity, 7);
+  assert.deepEqual(flexible.values, ['솔직한 표현', '관계의 평화']);
 });
 
 test('parseAnalystResult throws descriptive errors on invalid JSON or missing fields', () => {
@@ -310,6 +323,10 @@ test('parseSafeApiJson and shouldRetryProxyResponse handle non-JSON proxy errors
   assert.equal(shouldRetryProxyResponse(200, proxyText), true);
   assert.equal(shouldRetryProxyResponse(200, '{"status":"ok"}'), false);
   assert.equal(shouldRetryProxyResponse(400, '{"error":"잘못된 입력"}'), false);
+  assert.equal(shouldRetryProxyResponse(0, '', 'opaqueredirect'), false);
+
+  const unavailable = formatGeminiUserError(new Error('503 UNAVAILABLE'), 'analyze');
+  assert.equal(unavailable.statusCode, 500);
 
   assert.throws(
     () => parseSafeApiJson(proxyText, 502, '기본 안내'),

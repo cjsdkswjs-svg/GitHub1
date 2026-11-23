@@ -388,14 +388,26 @@ export function DrivingScreen({
                 className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
               >
                 <p className="min-w-0 flex-1 break-words">{replyError}</p>
-                <button
-                  type="button"
-                  onClick={onRetryLastMessage}
-                  className="inline-flex min-h-[40px] items-center gap-1.5 rounded-xl bg-amber-900 px-3.5 py-1.5 text-xs font-semibold text-white whitespace-nowrap shrink-0 cursor-pointer hover:opacity-90"
-                >
-                  <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-                  <span>다시 보내기</span>
-                </button>
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  {replyError.includes('새로고침') && (
+                    <button
+                      type="button"
+                      onClick={() => window.location.reload()}
+                      className="inline-flex min-h-[40px] items-center gap-1.5 rounded-xl border border-amber-400 bg-white px-3.5 py-1.5 text-xs font-semibold text-amber-950 whitespace-nowrap shrink-0 cursor-pointer hover:bg-amber-100"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                      <span>화면 새로고침</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={onRetryLastMessage}
+                    className="inline-flex min-h-[40px] items-center gap-1.5 rounded-xl bg-amber-900 px-3.5 py-1.5 text-xs font-semibold text-white whitespace-nowrap shrink-0 cursor-pointer hover:opacity-90"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span>다시 보내기</span>
+                  </button>
+                </div>
               </div>
             )}
 
