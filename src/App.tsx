@@ -9,6 +9,7 @@ import { RouteHeader } from './components/RouteHeader';
 import { SafetyNoticeCard } from './components/SafetyNoticeCard';
 import {
   AnalystResult,
+  ApiRequestContext,
   BoardingInput,
   ChatMessage,
   ConcernCategory,
@@ -18,21 +19,71 @@ import {
   DrivingMode,
   EmotionKey,
   FontScale,
+  formatClientNetworkError,
   formatTimeLabel,
   getEmotionTheme,
   loadMindDiaryEntries,
   MindDiaryEntry,
   parseAnalystResult,
   parseDriveLogSummary,
+  parseSafeApiJson,
   removeMindDiaryEntry,
   SafetyAssessment,
   SampleConcern,
   saveMindDiaryEntries,
   shouldAutoSummarizeDrive,
+  shouldRetryProxyResponse,
   upsertMindDiaryEntry,
   validateBoardingInput,
   validateChatMessage,
 } from './lib/daeriLogic';
+
+async function postApiJsonWithRetry<T>(
+  url: string,
+  body: unknown,
+  context: ApiRequestContext,
+  fallbackError: string,
+): Promise<{ status: number; ok: boolean; data: T }> {
+  const maxAttempts = 2;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 25000);
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+
+      const rawText = await response.text();
+      if (attempt < maxAttempts - 1 && shouldRetryProxyResponse(response.status, rawText)) {
+        await new Promise((resolve) => window.setTimeout(resolve, 700));
+        continue;
+      }
+
+      const data = parseSafeApiJson<T>(rawText, response.status, fallbackError);
+      return { status: response.status, ok: response.ok, data };
+    } catch (err: unknown) {
+      const isAbort = err instanceof Error && err.name === 'AbortError';
+      if (!isAbort && attempt < maxAttempts - 1) {
+        const msg = err instanceof Error ? err.message : String(err ?? '');
+        if (/failed to fetch|networkerror|load failed|혼잡|연결 경로/i.test(msg)) {
+          await new Promise((resolve) => window.setTimeout(resolve, 700));
+          continue;
+        }
+      }
+      throw new Error(formatClientNetworkError(err, context));
+    } finally {
+      window.clearTimeout(timeoutId);
+    }
+  }
+
+  throw new Error(formatClientNetworkError(new Error(fallbackError), context));
+}
 
 const INITIAL_INPUT: BoardingInput = {
   category: '친구 관계',
@@ -136,18 +187,17 @@ export default function App() {
     setLastSummarizedCount(0);
 
     try {
-      const response = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(currentInput),
-      });
-
-      const payload = (await response.json()) as {
+      const { ok, data: payload } = await postApiJsonWithRetry<{
         status?: string;
         safetyLevel?: 'crisis' | 'harassment';
         analysis?: unknown;
         error?: string;
-      };
+      }>(
+        '/api/analyze',
+        currentInput,
+        'analyze',
+        '계기판 분석 요청을 처리하지 못했습니다. 다시 시도해 주세요.',
+      );
 
       if (capturedSession !== rideSessionRef.current) return;
 
@@ -168,7 +218,7 @@ export default function App() {
         return;
       }
 
-      if (!response.ok) {
+      if (!ok) {
         throw new Error(
           payload.error || '계기판 분석 요청을 처리하지 못했습니다. 다시 시도해 주세요.',
         );
@@ -182,11 +232,7 @@ export default function App() {
       setAnalysis(parsed);
     } catch (err: unknown) {
       if (capturedSession !== rideSessionRef.current) return;
-      const message =
-        err instanceof Error
-          ? err.message
-          : '계기판 점검 중 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.';
-      setAnalyzeError(message);
+      setAnalyzeError(formatClientNetworkError(err, 'analyze'));
       setAnalysis(null);
     } finally {
       if (capturedSession === rideSessionRef.current) {
@@ -214,24 +260,23 @@ export default function App() {
     setLastPendingText(userText);
 
     try {
-      const response = await fetch('/api/drive', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const { ok, data: payload } = await postApiJsonWithRetry<{
+        status?: string;
+        safetyLevel?: 'crisis' | 'harassment';
+        reply?: string;
+        error?: string;
+      }>(
+        '/api/drive',
+        {
           input,
           analysis,
           mode: activeMode,
           messages: historyForServer,
           userMessage: userText,
-        }),
-      });
-
-      const payload = (await response.json()) as {
-        status?: string;
-        safetyLevel?: 'crisis' | 'harassment';
-        reply?: string;
-        error?: string;
-      };
+        },
+        'drive',
+        '기사님의 답변을 불러오지 못했습니다. 다시 시도해 주세요.',
+      );
 
       if (capturedSession !== rideSessionRef.current) return;
 
@@ -251,7 +296,7 @@ export default function App() {
         return;
       }
 
-      if (!response.ok || !payload.reply) {
+      if (!ok || !payload.reply) {
         throw new Error(
           payload.error || '기사님의 답변을 불러오지 못했습니다. 다시 시도해 주세요.',
         );
@@ -268,11 +313,7 @@ export default function App() {
       setLastPendingText(null);
     } catch (err: unknown) {
       if (capturedSession !== rideSessionRef.current) return;
-      const msg =
-        err instanceof Error
-          ? err.message
-          : '응답을 받는 중 잠시 오류가 생겼습니다. 다시 보내 보시겠어요?';
-      setReplyError(msg);
+      setReplyError(formatClientNetworkError(err, 'drive'));
     } finally {
       if (capturedSession === rideSessionRef.current) {
         setIsReplying(false);
@@ -334,25 +375,24 @@ export default function App() {
       setSummaryError(null);
 
       try {
-        const response = await fetch('/api/drive-summary', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            input,
-            analysis,
-            messages: targetMessages,
-          }),
-        });
-
-        const payload = (await response.json()) as {
+        const { ok, data: payload } = await postApiJsonWithRetry<{
           status?: string;
           summary?: unknown;
           error?: string;
-        };
+        }>(
+          '/api/drive-summary',
+          {
+            input,
+            analysis,
+            messages: targetMessages,
+          },
+          'summary',
+          '운행 일지 요약을 정리하지 못했습니다. 다시 시도해 주세요.',
+        );
 
         if (capturedSession !== rideSessionRef.current) return;
 
-        if (!response.ok || payload.status !== 'ok') {
+        if (!ok || payload.status !== 'ok') {
           throw new Error(
             payload.error || '운행 일지 요약을 정리하지 못했습니다. 다시 시도해 주세요.',
           );
@@ -367,11 +407,7 @@ export default function App() {
         setLastSummarizedCount(capturedCount);
       } catch (err: unknown) {
         if (capturedSession !== rideSessionRef.current) return;
-        const msg =
-          err instanceof Error
-            ? err.message
-            : '운행 일지 요약 중 잠시 오류가 발생했습니다.';
-        setSummaryError(msg);
+        setSummaryError(formatClientNetworkError(err, 'summary'));
       } finally {
         if (capturedSession === rideSessionRef.current) {
           setIsSummarizing(false);

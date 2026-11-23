@@ -7,6 +7,7 @@ import {
   createInitialDriverGreeting,
   detectSafetySignal,
   DRIVING_MODES,
+  formatClientNetworkError,
   formatGeminiUserError,
   formatKoreanDateLabel,
   getDrivingBackdropConfig,
@@ -18,11 +19,13 @@ import {
   MindDiaryEntry,
   parseAnalystResult,
   parseDriveLogSummary,
+  parseSafeApiJson,
   parseStoredMindDiary,
   removeMindDiaryEntry,
   saveMindDiaryEntries,
   selectWarningLight,
   shouldAutoSummarizeDrive,
+  shouldRetryProxyResponse,
   upsertMindDiaryEntry,
   validateBoardingInput,
   validateChatMessage,
@@ -301,4 +304,56 @@ test('formatGeminiUserError masks raw JSON/quota errors behind friendly Korean g
   assert.ok(formattedUnknown.message.includes('기사님'));
 });
 
+test('parseSafeApiJson and shouldRetryProxyResponse handle non-JSON proxy errors safely', () => {
+  const proxyText = 'The page could not be loaded. Please try again later.';
+  assert.equal(shouldRetryProxyResponse(502, proxyText), true);
+  assert.equal(shouldRetryProxyResponse(200, proxyText), true);
+  assert.equal(shouldRetryProxyResponse(200, '{"status":"ok"}'), false);
+  assert.equal(shouldRetryProxyResponse(400, '{"error":"잘못된 입력"}'), false);
 
+  assert.throws(
+    () => parseSafeApiJson(proxyText, 502, '기본 안내'),
+    (err: unknown) =>
+      err instanceof Error &&
+      !err.message.includes('The page') &&
+      !err.message.includes('Unexpected token') &&
+      err.message.includes('혼잡'),
+  );
+
+  assert.throws(
+    () => parseSafeApiJson('<html><body>503 Service Unavailable</body></html>', 503, '기본 안내'),
+    (err: unknown) =>
+      err instanceof Error && !err.message.includes('<html') && err.message.includes('혼잡'),
+  );
+
+  assert.throws(
+    () => parseSafeApiJson('', 500, '기본 안내'),
+    (err: unknown) => err instanceof Error && err.message.includes('혼잡'),
+  );
+
+  const ok = parseSafeApiJson<{ status: string }>('{"status":"ok"}', 200, '기본 안내');
+  assert.equal(ok.status, 'ok');
+});
+
+test('formatClientNetworkError masks SyntaxError and network errors while keeping Korean errors', () => {
+  const syntaxErr = new SyntaxError('Unexpected token \'T\', "The page c"... is not valid JSON');
+  const analyzeMsg = formatClientNetworkError(syntaxErr, 'analyze');
+  assert.ok(!analyzeMsg.includes('Unexpected token'));
+  assert.ok(!analyzeMsg.includes('JSON'));
+  assert.ok(analyzeMsg.includes('계기판'));
+
+  const fetchErr = new TypeError('Failed to fetch');
+  const driveMsg = formatClientNetworkError(fetchErr, 'drive');
+  assert.ok(!driveMsg.includes('Failed to fetch'));
+  assert.ok(driveMsg.includes('기사님'));
+
+  const abortErr = new Error('The user aborted a request.');
+  abortErr.name = 'AbortError';
+  assert.ok(formatClientNetworkError(abortErr, 'summary').includes('시간이 길어져'));
+
+  const koreanMsg = formatClientNetworkError(
+    new Error('오늘 AI 응답 이용 한도가 잠시 모두 소진되어 쉬어가고 있어요.'),
+    'analyze',
+  );
+  assert.equal(koreanMsg, '오늘 AI 응답 이용 한도가 잠시 모두 소진되어 쉬어가고 있어요.');
+});

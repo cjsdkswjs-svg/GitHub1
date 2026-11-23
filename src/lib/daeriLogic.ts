@@ -959,4 +959,80 @@ export function formatGeminiUserError(
   };
 }
 
+export type ApiRequestContext = 'analyze' | 'drive' | 'summary';
+
+function getFriendlyHttpFallback(status: number, fallbackMessage: string): string {
+  if (status === 429) {
+    return '요청이 잠시 몰려 숨을 고르고 있어요. 잠시 후 다시 시도해 주세요.';
+  }
+  if (status === 404) {
+    return '연결 경로를 찾지 못했어요. 페이지를 새로고침한 뒤 다시 시도해 주세요.';
+  }
+  if (status === 408 || status === 502 || status === 503 || status === 504 || status >= 500) {
+    return '잠시 응답 도로가 혼잡해 연결이 지연되고 있어요. 잠시 후 다시 시도해 주세요.';
+  }
+  return fallbackMessage;
+}
+
+export function shouldRetryProxyResponse(status: number, rawText: string): boolean {
+  if (status === 408 || status === 502 || status === 503 || status === 504) {
+    return true;
+  }
+  const trimmed = rawText.trim();
+  if (!trimmed) {
+    return status >= 500 || status === 200;
+  }
+  try {
+    JSON.parse(trimmed);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+export function parseSafeApiJson<T>(
+  rawText: string,
+  status: number,
+  fallbackMessage: string,
+): T {
+  const trimmed = rawText.trim();
+  if (!trimmed) {
+    throw new Error(getFriendlyHttpFallback(status, fallbackMessage));
+  }
+
+  try {
+    return JSON.parse(trimmed) as T;
+  } catch {
+    throw new Error(getFriendlyHttpFallback(status, fallbackMessage));
+  }
+}
+
+export function formatClientNetworkError(
+  err: unknown,
+  context: ApiRequestContext,
+): string {
+  if (err instanceof Error && err.name === 'AbortError') {
+    return '응답 시간이 길어져 연결을 잠시 멈췄어요. 잠시 후 다시 시도해 주세요.';
+  }
+
+  const raw = err instanceof Error ? err.message : String(err ?? '');
+  const looksLikeRawTechnicalError =
+    !raw.trim() ||
+    !/[가-힣]/.test(raw) ||
+    /unexpected token|not valid json|json\.parse|syntaxerror|failed to fetch|networkerror|load failed|err_network|aborterror|timeout/i.test(
+      raw,
+    );
+
+  if (!looksLikeRawTechnicalError) {
+    return raw.trim();
+  }
+
+  if (context === 'analyze') {
+    return '계기판 연결 신호가 잠시 불안정해요. 다시 점검하거나 계기판 없이 바로 운행을 시작해 보세요.';
+  }
+  if (context === 'summary') {
+    return '운행 일지 요약 연결이 잠시 지연되었어요. 잠시 후 새로고침 버튼을 눌러 주세요.';
+  }
+  return '기사님과의 연결 신호가 잠시 흔들렸어요. 같은 메시지를 다시 보내 보시겠어요?';
+}
 

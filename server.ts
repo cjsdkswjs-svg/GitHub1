@@ -58,14 +58,24 @@ async function withGeminiRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promis
   throw lastError;
 }
 
+const PRIMARY_QUOTA_COOLDOWN_MS = 5 * 60 * 1000;
+let primaryQuotaCooldownUntil = 0;
+
 async function generateWithModelFallback(
   ai: GoogleGenAI,
   callForModel: (model: string) => Promise<{ text?: string }>,
 ) {
+  if (Date.now() < primaryQuotaCooldownUntil) {
+    return await withGeminiRetry(() => callForModel(FALLBACK_MODEL), 2);
+  }
+
   try {
     return await withGeminiRetry(() => callForModel(PRIMARY_MODEL));
   } catch (primaryErr: unknown) {
     const msg = primaryErr instanceof Error ? primaryErr.message : String(primaryErr);
+    if (isQuotaExhaustedMessage(msg)) {
+      primaryQuotaCooldownUntil = Date.now() + PRIMARY_QUOTA_COOLDOWN_MS;
+    }
     const shouldTryFallback =
       isQuotaExhaustedMessage(msg) ||
       /UNAVAILABLE|DEADLINE_EXCEEDED|NOT_FOUND|\b502\b|\b503\b|\b504\b/i.test(msg);
@@ -503,6 +513,36 @@ ${modeInstructions[safeMode]}`;
       });
     }
   });
+
+  app.use('/api', (_req, res) => {
+    return res.status(404).json({
+      error: '요청하신 운행 경로를 찾지 못했습니다.',
+    });
+  });
+
+  app.use(
+    '/api',
+    (
+      err: unknown,
+      _req: express.Request,
+      res: express.Response,
+      _next: express.NextFunction,
+    ) => {
+      console.error('[/api error middleware]:', err);
+      const maybeStatus = (err as { status?: unknown; statusCode?: unknown })?.status ??
+        (err as { statusCode?: unknown })?.statusCode;
+      const status =
+        typeof maybeStatus === 'number' && maybeStatus >= 400 && maybeStatus < 600
+          ? maybeStatus
+          : 500;
+      return res.status(status).json({
+        error:
+          status === 400
+            ? '요청 형식을 읽지 못했습니다. 다시 시도해 주세요.'
+            : '서버 연결 처리 중 잠시 오류가 발생했습니다. 다시 시도해 주세요.',
+      });
+    },
+  );
 
   if (isProduction) {
     const distDir = path.resolve(__dirname, 'dist');
